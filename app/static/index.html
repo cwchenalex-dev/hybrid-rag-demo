@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Base Q&A Bot</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 800px;
+            margin: 30px auto;
+            padding: 0 20px;
+            line-height: 1.6;
+        }
+
+        .card {
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 20px;
+            background-color: #f6f8fa;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #0366d6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:disabled {
+            background-color: #94d3a2;
+            cursor: not-allowed;
+        }
+
+        .source-item {
+            background: #ffffff;
+            border-left: 4px solid #0366d6;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            border-radius: 2px;
+        }
+
+        .source-title {
+            font-weight: bold;
+            font-size: 0.9em;
+            color: #24292e;
+        }
+
+        .source-score {
+            font-size: 0.8em;
+            color: #586069;
+            float: right;
+        }
+
+        .source-content {
+            font-size: 0.85em;
+            color: #444;
+            margin-top: 4px;
+        }
+
+        .answer-box {
+            background: #ffffff;
+            border: 1px solid #e1e4e8;
+            padding: 15px;
+            border-radius: 6px;
+            white-space: pre-wrap;
+        }
+
+        .badge {
+            background: #e1f5fe;
+            color: #0288d1;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>🤖 Knowledge Base Q&A Bot</h2>
+
+    <div class="input-group">
+        <input
+            type="text"
+            id="queryInput"
+            placeholder="輸入您的問題..."
+            onkeydown="if(event.key==='Enter') sendQuery()"
+        >
+
+        <button
+            id="sendBtn"
+            onclick="sendQuery()"
+        >
+            發送提問
+        </button>
+
+        <button
+            id="indexBtn"
+            onclick="reindex()"
+            style="background-color: #2ea44f;"
+        >
+            重建索引
+        </button>
+    </div>
+
+    <div
+        id="status"
+        style="margin-bottom: 15px; font-weight: bold;"
+    ></div>
+
+    <div
+        id="resultArea"
+        style="display: none;"
+    >
+        <h3>📌 檢索來源 (Selected Sources)</h3>
+
+        <div id="sourcesContainer"></div>
+
+        <h3>💡 模型的回答 (Answer)</h3>
+
+        <div
+            id="answerContainer"
+            class="answer-box"
+        ></div>
+    </div>
+
+
+    <script>
+
+        // ====================================================
+        // Rebuild Index
+        // ====================================================
+
+        async function reindex() {
+
+            const statusDiv =
+                document.getElementById('status');
+
+            statusDiv.textContent =
+                "正在重建索引...";
+
+            try {
+
+                const res = await fetch(
+                    '/index',
+                    {
+                        method: 'POST'
+                    }
+                );
+
+                const data =
+                    await res.json();
+
+                if (!res.ok) {
+
+                    throw new Error(
+                        data.detail ||
+                        'Index request failed'
+                    );
+                }
+
+                statusDiv.textContent =
+                    `✅ 索引完成！共索引 ${data.files_indexed} 個檔案、${data.sections_indexed} 個區段。`;
+
+            } catch (err) {
+
+                statusDiv.textContent =
+                    "❌ 索引失敗: " + err;
+            }
+        }
+
+
+        // ====================================================
+        // Render Source
+        // ====================================================
+
+
+        function renderSource(
+            src,
+            sourcesContainer
+        ) {
+
+            const item =
+                document.createElement('div');
+
+            item.className =
+                'source-item';
+
+
+            const title =
+                document.createElement('div');
+
+            title.className =
+                'source-title';
+
+
+            const sourceText =
+                document.createElement('span');
+
+            sourceText.textContent =
+                `📄 ${src.source} `;
+
+
+            const badge =
+                document.createElement('span');
+
+            badge.className =
+                'badge';
+
+            badge.textContent =
+                src.heading;
+
+
+            const score =
+                document.createElement('span');
+
+            score.className =
+                'source-score';
+
+            score.textContent =
+                `Score: ${src.score}`;
+
+
+            const content =
+                document.createElement('div');
+
+            content.className =
+                'source-content';
+
+            content.textContent =
+                `${src.content}...`;
+
+
+            title.appendChild(
+                sourceText
+            );
+
+            title.appendChild(
+                badge
+            );
+
+            title.appendChild(
+                score
+            );
+
+            item.appendChild(
+                title
+            );
+
+            item.appendChild(
+                content
+            );
+
+            sourcesContainer.appendChild(
+                item
+            );
+        }
+
+
+        // ====================================================
+        // Send Query
+        // ====================================================
+
+        async function sendQuery() {
+
+            const query =
+                document
+                    .getElementById('queryInput')
+                    .value
+                    .trim();
+
+
+            if (!query) {
+                return;
+            }
+
+
+            const sendBtn =
+                document.getElementById(
+                    'sendBtn'
+                );
+
+            const statusDiv =
+                document.getElementById(
+                    'status'
+                );
+
+            const resultArea =
+                document.getElementById(
+                    'resultArea'
+                );
+
+            const sourcesContainer =
+                document.getElementById(
+                    'sourcesContainer'
+                );
+
+            const answerContainer =
+                document.getElementById(
+                    'answerContainer'
+                );
+
+
+            sendBtn.disabled = true;
+
+            statusDiv.textContent =
+                "正在檢索與生成回答...";
+
+            resultArea.style.display =
+                'none';
+
+            sourcesContainer.replaceChildren();
+
+            answerContainer.textContent =
+                '';
+
+
+            try {
+
+                const res =
+                    await fetch(
+                        '/chat',
+                        {
+                            method: 'POST',
+
+                            headers: {
+                                'Content-Type':
+                                    'application/json'
+                            },
+
+                            body: JSON.stringify({
+                                query: query
+                            })
+                        }
+                    );
+
+
+                const data =
+                    await res.json();
+
+
+                if (!res.ok) {
+
+                    throw new Error(
+                        data.detail ||
+                        'Chat request failed'
+                    );
+                }
+
+
+                statusDiv.textContent =
+                    '';
+
+
+                if (
+                    data.sources &&
+                    data.sources.length > 0
+                ) {
+
+                    data.sources.forEach(
+                        src =>
+                            renderSource(
+                                src,
+                                sourcesContainer
+                            )
+                    );
+
+                } else {
+
+                    const empty =
+                        document.createElement(
+                            'i'
+                        );
+
+                    empty.textContent =
+                        '（未檢索到符合門檻的相關資料）';
+
+                    sourcesContainer.appendChild(
+                        empty
+                    );
+                }
+
+
+                answerContainer.textContent =
+                    data.answer;
+
+                resultArea.style.display =
+                    'block';
+
+
+            } catch (err) {
+
+                statusDiv.textContent =
+                    "❌ 發生錯誤: " + err;
+
+            } finally {
+
+                sendBtn.disabled =
+                    false;
+            }
+        }
+
+    </script>
+
+</body>
+</html>
